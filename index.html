@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f4f6f9">
+  <meta name="description" content="聽譯流 EchoFlow — 使用 Edge 即時語音辨識與裝置端翻譯的極簡逐字稿工具。">
+  <title>聽譯流 EchoFlow</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%233e6e9f'/%3E%3Cpath d='M16 29v6m8-15v24m8-30v36m8-30v24m8-15v6' stroke='white' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="masthead">
+      <div class="brand"><div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><div><h1>聽譯流 <span>EchoFlow</span></h1></div></div>
+      <section class="controls" aria-label="轉錄控制面板">
+        <div class="capture-controls">
+          <label>辨識語言<select id="source-language"></select></label>
+          <span class="direction" aria-hidden="true">→</span>
+          <label>翻譯語言<select id="target-language"></select></label>
+          <button id="record" class="primary record" type="button" disabled><span class="record-dot" aria-hidden="true"></span><span id="record-label">開始轉錄</span></button>
+        </div>
+        <div class="document-controls">
+          <label class="mode-label"><span class="sr-only">顯示模式</span><select id="display-mode"><option value="both">翻譯加原文</option><option value="source">原文</option><option value="translation">翻譯</option></select></label>
+          <button id="retranslate" class="quiet" type="button">全文重新翻譯</button>
+          <div class="export-controls"><button id="copy" type="button">複製</button><button id="export" type="button">匯出 TXT</button></div>
+        </div>
+        <button id="settings-open" class="quiet" type="button"><span aria-hidden="true">⚙</span> 設定</button>
+      </section>
+    </header>
+
+    <main>
+      <div id="tab-banner" class="tab-banner" role="alert" hidden><span id="tab-banner-text"></span><button id="tab-takeover" type="button">改在此分頁使用</button></div>
+      <div id="draft-banner" class="tab-banner draft-banner" role="status" hidden><span id="draft-text"></span><span class="banner-actions"><button id="draft-restore" class="primary" type="button">恢復為段落</button><button id="draft-discard" type="button">捨棄</button></span></div>
+      <section class="paper" aria-label="逐字稿">
+        <div class="paper-heading"><span><span class="small-dot" aria-hidden="true"></span> LIVE TRANSCRIPT</span><div><span id="paragraph-count">0 段</span><button id="clear" class="text-button" type="button">清空內容</button></div></div>
+        <div id="transcript" aria-label="逐字稿內容">
+          <div id="empty" class="empty-state"><div class="empty-wave" aria-hidden="true">▂ ▅ ▃ ▇ ▃ ▅ ▂</div><h2>從一句話開始</h2><p>選擇語言，按下「開始轉錄」。<br>原文即時浮現，句子落地後接著翻譯。</p><span class="empty-tag">EDGE 語音辨識 · 裝置端翻譯</span></div>
+          <div id="segments"></div>
+          <article id="interim" class="segment interim" hidden><div class="segment-label">辨識中</div><p class="source"></p><p class="translation placeholder">（原文辨識中）</p></article>
+        </div>
+        <button id="scroll-bottom" class="scroll-bottom" type="button" hidden>↓ 回到最新內容</button>
+        <div class="paper-footnote"><span id="footnote-text">文字自動保存在此瀏覽器 · 語音辨識可能需要網路連線</span><span id="recovery" class="recovery" hidden><button id="export-raw" class="text-button" type="button">下載原始備份</button><button id="discard-raw" class="text-button" type="button" disabled>捨棄舊資料並開始保存</button></span></div>
+      </section>
+    </main>
+
+    <footer class="statusbar"><div class="statuses"><span id="speech-status" role="status"><span class="status-dot"></span>準備就緒</span><span class="status-divider">/</span><span id="translation-status" role="status">等待轉錄</span></div><button id="author" class="text-button" type="button" aria-label="作者：徐承佑，切換深淺色模式" aria-pressed="false">作者：徐承佑 <span aria-hidden="true">◐</span></button><div class="status-actions"><span class="shortcut-hint" title="F8：重試失敗或未完成的翻譯；F9：轉錄中強制重新啟動辨識"><kbd>F8</kbd> 重試翻譯 · <kbd>F9</kbd> 重啟辨識</span><label class="force-bottom-label"><input id="force-bottom" type="checkbox">強制置底</label></div></footer>
+    <button id="scroll-top" class="scroll-top" type="button" title="暫停置底並回到頂端" aria-label="取消強制置底，暫停自動捲動並回到頂端">↑</button>
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+  </div>
+
+  <dialog id="settings" aria-labelledby="settings-title">
+    <div class="dialog-heading"><div><span class="eyebrow">PREFERENCES</span><h2 id="settings-title">設定</h2></div><button id="settings-close" class="icon-button" type="button" aria-label="關閉設定">×</button></div>
+    <section class="settings-section appearance-settings"><h3>文字外觀</h3><p>調整會立即套用至後方逐字稿。字型使用此電腦已安裝的字型，未安裝時自動使用替代字型。顏色依淺色／深色模式分別保存。</p>
+      <fieldset><legend>原文</legend><div class="appearance-row"><label>字型<select id="source-font"></select></label><label class="color-field">顏色<input id="source-color" type="color" value="#233243"></label></div><label class="size-field" for="source-size">大小 <output id="source-size-output" for="source-size">18 px</output><input id="source-size" type="range" min="12" max="40" step="1" value="18"></label></fieldset>
+      <fieldset><legend>翻譯</legend><div class="appearance-row"><label>字型<select id="translation-font"></select></label><label class="color-field">顏色<input id="translation-color" type="color" value="#426e9d"></label></div><label class="size-field" for="translation-size">大小 <output id="translation-size-output" for="translation-size">18 px</output><input id="translation-size" type="range" min="12" max="40" step="1" value="18"></label></fieldset>
+      <button id="appearance-reset" class="text-button" type="button">還原預設文字外觀</button>
+    </section>
+    <section class="settings-section"><h3>準備翻譯包</h3><p>按「開始轉錄」或轉錄中切換語言時，會自動準備目前的語言配對，完成後補翻譯先前的段落。也可在此預先下載：選擇來源及目標語言，每次點擊準備一組。模型由瀏覽器管理，下載後可供其他網站共用。</p>
+      <div class="package-selects"><label>來源語言<select id="package-source"></select></label><span aria-hidden="true">→</span><label>目標語言<select id="package-target"></select></label></div>
+      <div class="package-actions"><button id="prepare" class="primary" type="button">檢查並預先下載</button><button id="check-packages" type="button">重新檢查</button></div>
+      <p id="package-message" class="package-message" role="status"></p>
+      <progress id="package-progress" max="1" value="0" aria-label="翻譯包下載進度" hidden></progress>
+      <ul id="package-list" class="package-list" aria-label="翻譯包狀態"></ul>
+      <button id="retry" class="quiet retry" type="button" title="快捷鍵 F8">重試失敗／未完成的翻譯（F8）</button>
+    </section>
+    <section class="settings-section"><h3>自動復原與快捷鍵</h3><p>隨時按 <kbd>F8</kbd> 可重試失敗或未完成的翻譯（不需打開設定）。轉錄中按 <kbd>F9</kbd> 可強制重啟辨識，切換來源語言也會直接接續重啟。最近 10 秒內累計 5 秒明顯聲音卻沒有文字進展時，自動重啟；監測只在本機量測音量，不錄音、不播放。連續復原仍無進展時會暫停並提示。長時間沒有人說話時，辨識服務自動結束會立即接續聆聽，不會因靜默而停止轉錄。</p><p>往上回看超過視窗高度的 1/3 會暫停自動置底。「強制置底」可鎖定跟隨，右下角「↑」可取消並回到頂端。</p></section>
+    <section class="settings-section"><h3>關於使用與保存</h3><p>使用 Windows 電腦版 Edge 可獲得較佳體驗。請允許麥克風權限，並透過 HTTPS 或 localhost 開啟網頁。</p><p>語音由瀏覽器的辨識服務處理，可能需要連網；翻譯使用瀏覽器本機模型。逐字稿儲存在此網站的本機瀏覽器，清除網站資料也會刪除內容，重要文字請匯出備份。同時開啟多個分頁時，只有一個分頁能轉錄及保存，其他分頁可按「改在此分頁使用」接手。</p><p>切換辨識語言或翻譯語言只影響後續段落。要讓舊段落改用目前的翻譯語言，請按「全文重新翻譯」。複製及匯出只包含已落地文字，不包含辨識中或狀態提示。</p><p id="capabilities"></p></section>
+    <section class="settings-section license-section" aria-labelledby="license-title">
+      <h3 id="license-title">授權聲明</h3>
+      <p>聽譯流 EchoFlow 採用 MIT License。<br>Copyright © 2026 徐承佑。</p>
+      <p>您可以使用、複製、修改、散布及商業使用本軟體；散布本軟體或其重要部分時，須保留原始版權及完整授權聲明。</p>
+      <p>本軟體依「現狀」提供，不提供任何明示或默示擔保。完整條款請參閱 <a id="license-link" href="./LICENSE" target="_blank" rel="noopener">MIT 授權全文</a>。</p>
+      <p>Microsoft Edge 語音辨識、翻譯模型及系統字型由各自提供者管理，依其適用條款使用，不因本軟體的 MIT 授權而變更。</p>
+    </section>
+  </dialog>
+  <dialog id="license-dialog" aria-labelledby="license-dialog-title"><div class="dialog-heading"><div><span class="eyebrow">LICENSE</span><h2 id="license-dialog-title">MIT 授權全文</h2></div><button id="license-close" class="icon-button" type="button" aria-label="關閉授權全文">×</button></div><pre id="license-text" class="license-text"></pre></dialog>
+  <dialog id="browser-warning" aria-labelledby="browser-title"><span class="eyebrow">A BETTER EXPERIENCE</span><h2 id="browser-title">使用 Edge，讓聽譯更順暢</h2><p>建議使用 Windows 電腦版 Microsoft Edge 開啟本工具，以獲得最佳語音辨識與翻譯體驗。</p><p>您仍可繼續瀏覽，並使用目前瀏覽器支援的功能。</p><button id="browser-ack" class="primary" type="button">我知道了</button></dialog>
+  <dialog id="clear-dialog" aria-labelledby="clear-title"><span class="eyebrow">START FRESH</span><h2 id="clear-title">清空所有逐字稿？</h2><p>這會停止轉錄並刪除此瀏覽器保存的文字。設定與已下載的翻譯包會保留，清空後無法復原。</p><div class="dialog-actions"><button id="clear-cancel" type="button">取消</button><button id="clear-confirm" class="danger" type="button">清空內容</button></div></dialog>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
