@@ -173,19 +173,30 @@ $('author').addEventListener('click', () => { prefs.theme = prefs.theme === 'dar
 function nearBottom() {
   return document.documentElement.scrollHeight - window.scrollY - window.innerHeight <= window.innerHeight / 3;
 }
+// Bottom-right jump buttons:
+// - forced to the bottom: only "to top";
+// - reading older text (not following): both "to top" and "to bottom";
+// - already at the top: only "to bottom"; following at the bottom: only "to top".
+function updateScrollButtons() {
+  const scrollable = document.documentElement.scrollHeight - window.innerHeight > 8;
+  const atTop = window.scrollY <= 8;
+  $('scroll-top').hidden = !scrollable || atTop;
+  $('scroll-bottom').hidden = !scrollable || $('force-bottom').checked || follow || nearBottom();
+}
 function scrollAfterRender() {
   if (follow || $('force-bottom').checked) window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' });
-  $('scroll-bottom').hidden = follow || nearBottom();
+  updateScrollButtons();
 }
 window.addEventListener('scroll', () => {
-  if (skipTopScroll) { skipTopScroll = false; return; }
+  if (skipTopScroll) { skipTopScroll = false; updateScrollButtons(); return; }
   if ($('force-bottom').checked) {
     scrollAfterRender();
     return;
   }
   follow = nearBottom();
-  $('scroll-bottom').hidden = follow;
+  updateScrollButtons();
 }, { passive: true });
+window.addEventListener('resize', updateScrollButtons, { passive: true });
 $('scroll-bottom').addEventListener('click', () => { follow = true; skipTopScroll = false; scrollAfterRender(); });
 $('force-bottom').addEventListener('change', () => {
   skipTopScroll = false;
@@ -197,7 +208,7 @@ $('scroll-top').addEventListener('click', () => {
   follow = false;
   skipTopScroll = window.scrollY !== 0;
   window.scrollTo({ top: 0, behavior: 'instant' });
-  $('scroll-bottom').hidden = nearBottom();
+  updateScrollButtons();
 });
 
 function createSegmentNode() {

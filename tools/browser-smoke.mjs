@@ -328,24 +328,35 @@ try {
   });
   await check('force bottom can be escaped by up button and one-third threshold pauses following', async () => {
     await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+    const buttons = () => evaluate('[!document.querySelector("#scroll-top").hidden,!document.querySelector("#scroll-bottom").hidden]');
     await evaluate('document.querySelector("#record").click();__recognizers.at(-1).emit(Array.from({length:30},(_,i)=>["Paragraph "+i,true]))');
     await sleep(200);
     assert.equal(await evaluate('document.documentElement.scrollHeight-window.scrollY-innerHeight<5'), true);
+    assert.deepEqual(await buttons(), [true, false], 'following at the bottom: only "to top"');
     await evaluate('window.scrollTo(0,document.documentElement.scrollHeight-innerHeight-innerHeight/3-30)');
     await sleep(100);
     const pausedAt = await evaluate('window.scrollY');
     await evaluate('__recognizers.at(-1).emit([...Array.from({length:30},(_,i)=>["Paragraph "+i,true]),["extra",true]])');
     assert.equal(await evaluate('window.scrollY'), pausedAt);
+    assert.deepEqual(await buttons(), [true, true], 'reading older text: both buttons');
     await evaluate('document.querySelector("#force-bottom").checked=true;document.querySelector("#force-bottom").dispatchEvent(new Event("change"));window.scrollTo(0,0)');
     await sleep(100);
     assert.equal(await evaluate('document.documentElement.scrollHeight-window.scrollY-innerHeight<5'), true);
+    assert.deepEqual(await buttons(), [true, false], 'forced to the bottom: only "to top"');
     await evaluate('document.querySelector("#scroll-top").click()');
     await sleep(100);
     assert.equal(await evaluate('document.querySelector("#force-bottom").checked'), false);
     assert.equal(await evaluate('window.scrollY'), 0);
     await evaluate('__recognizers.at(-1).emit([...Array.from({length:30},(_,i)=>["Paragraph "+i,true]),["extra",true],["after up",false]])');
     assert.equal(await evaluate('window.scrollY'), 0);
+    assert.deepEqual(await buttons(), [false, true], 'at the top: only "to bottom"');
     await screenshot('edge-sticky-toolbar.png');
+    await evaluate('document.querySelector("#scroll-bottom").click()');
+    await sleep(100);
+    assert.equal(await evaluate('document.documentElement.scrollHeight-window.scrollY-innerHeight<5'), true, '"to bottom" jumps to the latest text');
+    assert.deepEqual(await buttons(), [true, false], 'back to following: only "to top"');
+    await evaluate('__recognizers.at(-1).emit([...Array.from({length:30},(_,i)=>["Paragraph "+i,true]),["extra",true],["after up",true],["following again",true]])');
+    assert.equal(await evaluate('document.documentElement.scrollHeight-window.scrollY-innerHeight<5'), true, 'and keeps following new text');
     await evaluate('document.querySelector("#record").click()');
   });
   await check('F9 forces a fresh recognizer and commits interim exactly once', async () => {
