@@ -220,7 +220,7 @@ try {
     await evaluate('window.__denyDownload=false;document.querySelector("#settings-open").click()');
     await waitFor('!document.querySelector("#check-packages").disabled');
     // Real input event from CDP, not just DOM click.
-    const rect = await evaluate('(()=>{const r=document.querySelector("#prepare").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()');
+    const rect = await evaluate('(()=>{const b=document.querySelector("#prepare");b.scrollIntoView({block:"center"});const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()');
     await send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...rect });
     await send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...rect });
     await waitFor('document.querySelector("#translation-status").textContent==="翻譯已完成"');
@@ -230,6 +230,10 @@ try {
     await evaluate('document.querySelector("#source-size").value=30;document.querySelector("#source-size").dispatchEvent(new Event("input"));document.querySelector("#translation-size").value=25;document.querySelector("#translation-size").dispatchEvent(new Event("input"));document.querySelector("#translation-color").value="#bb4477";document.querySelector("#translation-color").dispatchEvent(new Event("input"));document.querySelector("#source-font").value="kai";document.querySelector("#source-font").dispatchEvent(new Event("input"))');
     assert.deepEqual(await evaluate('[getComputedStyle(document.querySelector("#segments .source")).fontSize,getComputedStyle(document.querySelector("#segments .translation")).fontSize,getComputedStyle(document.querySelector("#segments .translation")).color]'), ['30px', '25px', 'rgb(187, 68, 119)']);
     assert.match(await evaluate('getComputedStyle(document.querySelector("#segments .source")).fontFamily'), /DFKai/);
+    // Line spacing: tighter default, adjustable for both source and translation.
+    assert.equal(await evaluate('getComputedStyle(document.querySelector("#segments .source")).lineHeight'), '48px', 'default 1.6 × 30px');
+    await evaluate('document.querySelector("#line-height").value=1.3;document.querySelector("#line-height").dispatchEvent(new Event("input"))');
+    assert.deepEqual(await evaluate('[getComputedStyle(document.querySelector("#segments .source")).lineHeight,getComputedStyle(document.querySelector("#segments .translation")).lineHeight,document.querySelector("#line-height-output").value]'), ['39px', '32.5px', '1.30 倍']);
     await screenshot('edge-appearance.png');
     await evaluate('document.querySelector("#settings-close").click()');
   });
@@ -300,6 +304,7 @@ try {
     assert.equal(await evaluate('document.querySelector("#source-language").value'), 'ja');
     assert.equal(await evaluate('getComputedStyle(document.querySelector("#segments .source")).fontSize'), '30px');
     assert.equal(await evaluate('document.querySelector("#translation-color").value'), '#bb4477');
+    assert.equal(await evaluate('getComputedStyle(document.querySelector("#segments .source")).lineHeight'), '39px', 'line spacing persists');
   });
   await check('dark theme, mobile layout, whole-page scroll and sticky controls', async () => {
     await evaluate('document.querySelector("#author").click()');
@@ -311,9 +316,12 @@ try {
     assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'), true);
     await screenshot('edge-mobile.png');
     assert.equal(await evaluate('getComputedStyle(document.querySelector("#transcript")).overflowY'), 'visible');
-    await evaluate('document.querySelector("#record").click();window.scrollTo(0,0)');
+    // Make the page clearly taller than the screen, so the top is far from the bottom.
+    await evaluate('document.querySelector("#record").click();__recognizers[0].emit(Array.from({length:12},(_,i)=>["Filler paragraph "+i,true]))');
     await sleep(100);
-    await evaluate('__recognizers[0].emit([["new content",true]])');
+    await evaluate('window.scrollTo(0,0)');
+    await sleep(100);
+    await evaluate('__recognizers[0].emit([...Array.from({length:12},(_,i)=>["Filler paragraph "+i,true]),["new content",true]])');
     assert.equal(await evaluate('window.scrollY'), 0);
     assert.equal(await evaluate('Math.round(document.querySelector(".masthead").getBoundingClientRect().top)'), 0);
     await evaluate('document.querySelector("#record").click()');
@@ -360,6 +368,35 @@ try {
     await waitFor('document.querySelector("#translation-status").textContent==="翻譯已完成"', 'F8 retry translated the paragraph');
     assert.match(await evaluate('document.querySelector("#notice").textContent'), /1 段.*（F8）/);
     assert.deepEqual(await evaluate('[document.querySelector("#notice").getAttribute("role"),document.querySelector("#notice").getAttribute("aria-live")]'), ['status', 'polite']);
+  });
+  await check('translation dropdown shows one panel; the custom API translates with the saved URL, token and prompt', async () => {
+    // Intercept only the fake endpoint; nothing reaches a real service.
+    await evaluate(`{window.__apiCalls=[];const realFetch=window.fetch;window.fetch=async(url,init)=>{
+      if(!String(url).startsWith('https://llm.example/'))return realFetch(url,init);
+      const body=JSON.parse(init.body);__apiCalls.push({url:String(url),headers:init.headers,credentials:init.credentials,body});
+      return new Response(JSON.stringify({choices:[{message:{content:'API譯文：'+body.messages[1].content}}]}),{status:200,headers:{'Content-Type':'application/json'}});}}`);
+    await evaluate('document.querySelector("#settings-open").click()');
+    assert.deepEqual(await evaluate('[document.querySelector("#translation-method").value,document.querySelector("#panel-offline").hidden,document.querySelector("#panel-api").hidden,document.querySelector("#panel-offline h4").textContent]'), ['offline', false, true, '瀏覽器離線翻譯包']);
+    await evaluate('{const m=document.querySelector("#translation-method");m.value="api";m.dispatchEvent(new Event("change"))}');
+    assert.deepEqual(await evaluate('[document.querySelector("#panel-offline").hidden,document.querySelector("#panel-api").hidden]'), [true, false]);
+    assert.match(await evaluate('document.querySelector("#panel-api .warning-box").textContent'), /只保存在這台電腦.*公用.*清除 Token/s);
+    assert.equal(await evaluate('document.querySelector("#api-token").type'), 'password');
+    await evaluate(`for(const [id,v] of [["api-url","https://llm.example/v1/chat/completions"],["api-model","test-model"],["api-token","sk-smoke"],["api-prompt","請把{source}翻成{target}"]]){const el=document.getElementById(id);el.value=v;el.dispatchEvent(new Event("input"));}`);
+    assert.equal(await evaluate('JSON.parse(localStorage.getItem("echoflow.translation")).token'), 'sk-smoke');
+    assert.equal(await evaluate('localStorage.getItem("echoflow.preferences").includes("sk-smoke")'), false, 'token kept apart from other preferences');
+    await evaluate('document.querySelector("#api-test").click()');
+    await waitFor('document.querySelector("#api-message").textContent.includes("連線成功")', 'API test succeeded');
+    await evaluate('document.querySelector("#settings-close").click();document.querySelector("#record").click();__recognizers.at(-1).emit([["api sentence",true]]);document.querySelector("#record").click()');
+    await waitFor('[...document.querySelectorAll("#segments .translation")].some(n=>n.textContent==="API譯文：api sentence")', 'paragraph translated by the custom API');
+    const call = await evaluate('__apiCalls.at(-1)');
+    assert.equal(call.headers.Authorization, 'Bearer sk-smoke');
+    assert.equal(call.credentials, 'omit');
+    assert.equal(call.body.model, 'test-model');
+    assert.equal(call.body.messages[0].content, '請把日文翻成韓文');
+    // Back to the offline packages; the token can be cleared on its own.
+    await evaluate('document.querySelector("#settings-open").click();document.querySelector("#api-clear-token").click();{const m=document.querySelector("#translation-method");m.value="offline";m.dispatchEvent(new Event("change"))}');
+    assert.deepEqual(await evaluate('[JSON.parse(localStorage.getItem("echoflow.translation")).token,document.querySelector("#panel-offline").hidden]'), ['', false]);
+    await evaluate('document.querySelector("#settings-close").click()');
   });
   await check('five seconds of synthetic sound without progress restarts recognition end to end', async () => {
     await evaluate('document.querySelector("#record").click();__recognizers.at(-1).emit([["watchdog tail",false]])');

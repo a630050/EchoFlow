@@ -145,6 +145,26 @@ export function draftLanded(draft, segments) {
   return segments.slice(start).some(s => words(s.sourceText).includes(wanted));
 }
 
+// Translation method and custom API settings. Kept apart from the other preferences so the token
+// lives in exactly one place and "清除 Token" can remove it on its own. Local to this browser only.
+const TRANSLATION_KEY = 'echoflow.translation';
+export const defaultTranslationSettings = () => ({ method: 'offline', format: 'openai', url: '', model: '', token: '', prompt: '' });
+export function readTranslationSettings(storage) {
+  const result = defaultTranslationSettings();
+  try {
+    const value = JSON.parse(local(storage).getItem(TRANSLATION_KEY) || '{}');
+    if (value.method === 'api') result.method = 'api';
+    if (value.format === 'anthropic') result.format = 'anthropic';
+    for (const [field, max] of [['url', 2048], ['model', 200], ['token', 4096], ['prompt', 4000]]) {
+      if (typeof value[field] === 'string') result[field] = value[field].slice(0, max);
+    }
+  } catch {}
+  return result;
+}
+export function writeTranslationSettings(settings, storage) {
+  try { local(storage).setItem(TRANSLATION_KEY, JSON.stringify(settings)); return true; } catch { return false; }
+}
+
 export function readPreferences(storage) {
   const defaults = { source: 'en', target: 'zh-TW', mode: 'both', theme: 'light', warned: false, appearance: defaultAppearance() };
   try {

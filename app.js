@@ -1,5 +1,5 @@
-import { LANGUAGES, language, pairKey, isWindowsEdge, exportText, filename, SpeechController, TranslationService, Transcript } from './core.js';
-import { TranscriptStore, readPreferences, writePreferences, readDraft, writeDraft, clearDraft, readRecoverable, writeRecoverable, draftLanded } from './storage.js';
+import { LANGUAGES, language, pairKey, isWindowsEdge, exportText, filename, SpeechController, TranslationService, Transcript, ApiTranslator, checkApiConfig, DEFAULT_PROMPT, API_FORMATS } from './core.js';
+import { TranscriptStore, readPreferences, writePreferences, readDraft, writeDraft, clearDraft, readRecoverable, writeRecoverable, draftLanded, readTranslationSettings, writeTranslationSettings } from './storage.js';
 import { FONTS, defaultAppearance } from './appearance.js';
 import { VoiceSensor, VoiceStallWatchdog } from './voice-watchdog.js';
 
@@ -145,6 +145,9 @@ function applyAppearance(syncControls = false) {
       $(`${kind}-color`).value = color;
     }
   }
+  document.body.style.setProperty('--line-height', String(prefs.appearance.lineHeight));
+  $('line-height-output').value = `${prefs.appearance.lineHeight.toFixed(2)} 倍`;
+  if (syncControls) $('line-height').value = prefs.appearance.lineHeight;
   if (ready) scrollAfterRender();
 }
 for (const kind of ['source', 'translation']) {
@@ -158,6 +161,11 @@ for (const kind of ['source', 'translation']) {
     });
   }
 }
+$('line-height').addEventListener('input', event => {
+  prefs.appearance.lineHeight = Number(Number(event.target.value).toFixed(2));
+  applyAppearance();
+  savePreferences();
+});
 applyAppearance(true);
 $('appearance-reset').addEventListener('click', () => { prefs.appearance = defaultAppearance(); applyAppearance(true); savePreferences(); });
 $('author').addEventListener('click', () => { prefs.theme = prefs.theme === 'dark' ? 'light' : 'dark'; applyAppearance(true); savePreferences(); });
@@ -292,7 +300,12 @@ function renderPackages() {
   $('prepare').textContent = preparing ? '正在準備，請稍候…' : '檢查並預先下載';
 }
 const translator = new TranslationService({ api: globalThis.Translator, onPackage: packageUpdate });
-const model = new Transcript({ translator, onChange: segment => { render(segment); saveTranscript(); } });
+// Translation engine chosen in settings: the browser's offline packages or a custom API.
+let translation = readTranslationSettings();
+const apiTranslator = new ApiTranslator({ getConfig: () => translation });
+const usingApi = () => translation.method === 'api';
+const routedTranslator = { translate: (...args) => (usingApi() ? apiTranslator : translator).translate(...args) };
+const model = new Transcript({ translator: routedTranslator, onChange: segment => { render(segment); saveTranscript(); } });
 function refreshPair(source, target) {
   if (source === target) return;
   const key = pairKey(source, target);
@@ -303,7 +316,7 @@ function refreshPair(source, target) {
 }
 // Deliberately not async: Translator.create() must run while the click's user activation is live.
 function autoPrepare(source, target) {
-  if (source === target || !globalThis.Translator) return;
+  if (usingApi() || source === target || !globalThis.Translator) return;
   const state = packageStates.get(pairKey(source, target))?.state;
   if (state === 'unavailable' || state === 'unsupported') return;
   const download = state !== 'available';
@@ -450,9 +463,80 @@ async function checkPackages() {
   $('check-packages').disabled = false;
   renderPackages();
 }
+// ---- Translation method settings ----
+function showTranslationPanel() {
+  $('translation-method').value = translation.method;
+  $('panel-offline').hidden = usingApi();
+  $('panel-api').hidden = !usingApi();
+}
+function syncTranslationForm() {
+  showTranslationPanel();
+  $('api-format').value = translation.format;
+  $('api-url').value = translation.url;
+  $('api-model').value = translation.model;
+  $('api-token').value = translation.token;
+  $('api-prompt').value = translation.prompt || DEFAULT_PROMPT;
+  $('api-url').placeholder = API_FORMATS[translation.format].url;
+  $('api-model').placeholder = API_FORMATS[translation.format].model ? `例如 ${API_FORMATS[translation.format].model}` : '模型名稱';
+}
+function saveTranslation(patch) {
+  translation = { ...translation, ...patch };
+  if (!writeTranslationSettings(translation)) notify('無法保存翻譯設定；本次調整仍會生效，請確認瀏覽器允許儲存網站資料。', true);
+}
+$('translation-method').addEventListener('change', event => {
+  saveTranslation({ method: event.target.value === 'api' ? 'api' : 'offline' });
+  showTranslationPanel();
+  const problem = usingApi() ? checkApiConfig(translation) : '';
+  $('api-message').textContent = problem ? `尚未完成設定：${problem}。` : '';
+  notify(`後續段落改用${usingApi() ? '自定義 API' : '瀏覽器離線翻譯包'}翻譯；舊段落可按「全文重新翻譯」更新。`);
+});
+$('api-format').addEventListener('change', event => {
+  const format = event.target.value === 'anthropic' ? 'anthropic' : 'openai';
+  // Suggest the format's usual endpoint and model only where the field is still empty.
+  saveTranslation({ format, url: translation.url || API_FORMATS[format].url, model: translation.model || API_FORMATS[format].model });
+  syncTranslationForm();
+});
+for (const [id, field] of [['api-url', 'url'], ['api-model', 'model'], ['api-token', 'token']]) {
+  $(id).addEventListener('input', event => saveTranslation({ [field]: event.target.value.trim() }));
+}
+// The default prompt is stored as '' so it can improve in later versions without overriding edits.
+$('api-prompt').addEventListener('input', event => saveTranslation({ prompt: event.target.value.trim() === DEFAULT_PROMPT ? '' : event.target.value }));
+$('api-prompt-reset').addEventListener('click', () => { saveTranslation({ prompt: '' }); syncTranslationForm(); });
+$('api-token-toggle').addEventListener('click', () => {
+  const show = $('api-token').type === 'password';
+  $('api-token').type = show ? 'text' : 'password';
+  $('api-token-toggle').textContent = show ? '隱藏' : '顯示';
+  $('api-token-toggle').setAttribute('aria-pressed', String(show));
+});
+$('api-clear-token').addEventListener('click', () => {
+  saveTranslation({ token: '' });
+  syncTranslationForm();
+  $('api-message').textContent = '已從此瀏覽器清除 Token。';
+});
+$('api-test').addEventListener('click', async () => {
+  const source = 'en';
+  const target = prefs.target === 'en' ? 'zh-TW' : prefs.target;
+  $('api-test').disabled = true;
+  $('api-message').textContent = '測試中…';
+  try {
+    const result = await apiTranslator.translate('Hello, this is a quick translation test.', source, target);
+    $('api-message').textContent = `連線成功，${language(target).label}譯文：「${result.slice(0, 120)}」`;
+  } catch (error) {
+    $('api-message').textContent = `測試失敗：${error.message}`;
+  } finally { $('api-test').disabled = false; }
+});
+// Another tab changed the translation settings: follow them here too.
+window.addEventListener('storage', event => {
+  if (event.key !== 'echoflow.translation') return;
+  translation = readTranslationSettings();
+  if ($('settings').open) syncTranslationForm();
+});
+
 $('settings-open').addEventListener('click', () => {
   $('package-source').value = prefs.source;
   $('package-target').value = prefs.target;
+  syncTranslationForm();
+  $('api-message').textContent = '';
   $('settings').showModal();
   applyAppearance(true);
   renderPackages();

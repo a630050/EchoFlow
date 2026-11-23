@@ -339,6 +339,97 @@ export class TranslationService {
   }
 }
 
+// ---- Custom translation API ------------------------------------------------------------------
+// A provider of the person's choosing, called straight from the page with fetch (the page has no
+// build step or CDN, so no SDK). Two request formats: OpenAI-compatible Chat Completions, which
+// most providers and local model servers accept, and the Anthropic Messages API.
+export const DEFAULT_PROMPT = '你是專業的即時口譯員。請把使用者提供的{source}語音辨識文字翻譯成{target}。只輸出譯文本身，不要加上引號、說明、註解或原文；若原文有明顯的辨識錯字，請依上下文翻出最合理的意思。';
+export const API_FORMATS = {
+  openai: { label: 'OpenAI 相容（Chat Completions）', url: 'https://api.openai.com/v1/chat/completions', model: '' },
+  anthropic: { label: 'Anthropic（Claude Messages）', url: 'https://api.anthropic.com/v1/messages', model: 'claude-opus-5-5' },
+};
+// Models that accept Anthropic's server-side refusal fallback (`fallbacks: "default"`).
+const FALLBACK_MODELS = /^claude-(fable-5-[12]|opus-5(-5)?|sonnet-5-5)$/;
+
+export function fillPrompt(template, source, target) {
+  return template.replaceAll('{source}', language(source).label).replaceAll('{target}', language(target).label);
+}
+// Returns a message describing what is missing, or '' when the configuration can be used.
+export function checkApiConfig(config) {
+  let url;
+  try { url = new URL(config?.url || ''); } catch { return '請填寫有效的 API 網址'; }
+  const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) return 'API 網址須使用 https://（本機服務可用 http://localhost）';
+  if (!API_FORMATS[config.format]) return '請選擇介面格式';
+  if (!config.model?.trim()) return '請填寫模型名稱';
+  return '';
+}
+function apiRequest(config, system, text) {
+  const token = config.token?.trim();
+  if (config.format === 'anthropic') {
+    const model = config.model.trim();
+    const headers = { 'content-type': 'application/json', 'anthropic-version': '2026-10-21', 'anthropic-dangerous-direct-browser-access': 'true' };
+    if (token) headers['x-api-key'] = token;
+    const body = { model, max_tokens: 16000, system, messages: [{ role: 'user', content: text }] };
+    // Opt into server-side fallback on models that support it, so a policy decline is retried by
+    // the API on another model instead of leaving the paragraph untranslated.
+    if (FALLBACK_MODELS.test(model)) { headers['anthropic-beta'] = 'server-side-fallback-2026-07-01'; body.fallbacks = 'default'; }
+    return { headers, body };
+  }
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return { headers, body: { model: config.model.trim(), messages: [{ role: 'system', content: system }, { role: 'user', content: text }] } };
+}
+function apiText(format, data) {
+  if (format === 'anthropic') {
+    if (data?.stop_reason === 'refusal') throw new Error('外部模型拒絕翻譯這段內容');
+    return (Array.isArray(data?.content) ? data.content : []).filter(block => block?.type === 'text').map(block => block.text).join('');
+  }
+  const content = data?.choices?.[0]?.message?.content;
+  return Array.isArray(content) ? content.map(part => part?.text || '').join('') : content;
+}
+
+export class ApiTranslator {
+  constructor({ getConfig, fetch = (...args) => globalThis.fetch(...args), timeoutMs = 30000 }) {
+    Object.assign(this, { getConfig, fetch, timeoutMs });
+  }
+  async translate(text, source, target, signal) {
+    if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
+    if (source === target) return text;
+    const config = this.getConfig();
+    const problem = checkApiConfig(config);
+    if (problem) throw new Error(`自定義 API 設定不完整：${problem}`);
+    const system = fillPrompt(config.prompt?.trim() || DEFAULT_PROMPT, source, target);
+    const { headers, body } = apiRequest(config, system, text);
+    const controller = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, this.timeoutMs);
+    const cancel = () => controller.abort();
+    signal?.addEventListener('abort', cancel, { once: true });
+    let response, data;
+    try {
+      // credentials/referrer off: the request carries only what is shown here, never site cookies.
+      response = await this.fetch(config.url, { method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store' });
+      data = await response.json().catch(() => null);
+    } catch {
+      if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
+      if (timedOut) throw new Error('外部翻譯 API 逾時，請稍後重試');
+      throw new Error('無法連線到外部翻譯 API；請確認網址與網路，以及該服務允許瀏覽器跨來源請求（CORS）');
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', cancel);
+    }
+    if (!response.ok) {
+      const detail = String(data?.error?.message || data?.message || '').slice(0, 160);
+      const hint = response.status === 401 || response.status === 403 ? '（請檢查 Token）' : response.status === 404 ? '（請檢查網址與模型名稱）' : response.status === 429 ? '（請求過於頻繁或額度不足）' : '';
+      throw new Error(`外部翻譯 API 回應錯誤 HTTP ${response.status}${hint}${detail ? `：${detail}` : ''}`);
+    }
+    const translated = apiText(config.format, data);
+    if (typeof translated !== 'string' || !translated.trim()) throw new Error('外部翻譯 API 沒有回傳譯文');
+    return translated.trim();
+  }
+}
+
 export class Transcript {
   constructor({ translator, onChange = () => {}, makeId = () => crypto.randomUUID() }) {
     Object.assign(this, { translator, onChange, makeId });
