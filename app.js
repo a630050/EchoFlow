@@ -8,7 +8,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const prefs = readPreferences();
 const store = new TranscriptStore();
 const packageStates = new Map();
-const FOOTNOTE = '文字自動保存在此瀏覽器 · 語音辨識可能需要網路連線';
+const FOOTNOTE = '文字自動保存在此瀏覽器 · 語音辨識需要網路連線';
 let ready = false;
 let storeReady = false; // The saved transcript loaded and may be written back.
 let owner = true; // This tab holds the single-editor lock; only the owner records and saves.
@@ -59,7 +59,7 @@ function flushSave({ urgent = false } = {}) {
     if (saveTimer === null && !interimText.trim()) dropDraft();
   }).catch(error => {
     if (error?.code === 'fenced') { editorLost(); return; } // A newer editing tab exists; never overwrite it.
-    setFootnote('本機保存失敗，請匯出文字備份 · 語音辨識可能需要網路連線');
+    setFootnote('本機保存失敗，請匯出文字備份 · 語音辨識需要網路連線');
     if (!saveWarning) notify('逐字稿無法保存到瀏覽器，請匯出 TXT 備份，避免重整後遺失。', true);
     saveWarning = true;
   });
@@ -163,6 +163,7 @@ for (const kind of ['source', 'translation']) {
 }
 $('line-height').addEventListener('input', event => {
   prefs.appearance.lineHeight = Number(Number(event.target.value).toFixed(2));
+  prefs.appearance.lineHeightCustom = true;
   applyAppearance();
   savePreferences();
 });
@@ -714,7 +715,7 @@ async function initialize() {
       notify(`${error.message}。請先下載原始備份。`, true);
     } else {
       notify(`無法載入本機逐字稿：${error.message}。本次文字請匯出備份。`, true);
-      setFootnote('本機保存目前不可用，請匯出備份 · 語音辨識可能需要網路連線');
+      setFootnote('本機保存目前不可用，請匯出備份 · 語音辨識需要網路連線');
     }
   }
   ready = true;

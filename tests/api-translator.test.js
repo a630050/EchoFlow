@@ -109,11 +109,16 @@ test('translation settings are validated, size-limited and survive blocked stora
   assert.equal(writeTranslationSettings(openai, blocked), false);
 });
 
-test('line spacing defaults to a tighter 1.6 and is clamped to the slider steps', () => {
-  assert.equal(normalizeAppearance(undefined).lineHeight, 1.6);
-  assert.equal(LINE_HEIGHT.default, 1.6);
-  assert.equal(normalizeAppearance({ lineHeight: 1.33 }).lineHeight, 1.35);
-  assert.equal(normalizeAppearance({ lineHeight: 9 }).lineHeight, 1.6);
-  assert.equal(normalizeAppearance({ lineHeight: 'tight' }).lineHeight, 1.6);
-  assert.equal(normalizeAppearance({ lineHeight: 1.2 }).lineHeight, 1.2);
+test('line spacing runs from 1.0, defaults to 1.2 and keeps only values the person chose', () => {
+  assert.deepEqual([LINE_HEIGHT.min, LINE_HEIGHT.default], [1, 1.2]);
+  assert.deepEqual([normalizeAppearance(undefined).lineHeight, normalizeAppearance(undefined).lineHeightCustom], [1.2, false]);
+  const chosen = value => normalizeAppearance({ lineHeight: value, lineHeightCustom: true }).lineHeight;
+  assert.equal(chosen(1.33), 1.35, 'snapped to the slider step');
+  assert.equal(chosen(1), 1);
+  assert.equal(chosen(0.8), 1.2, 'below the range');
+  assert.equal(chosen(9), 1.2, 'above the range');
+  assert.equal(chosen('tight'), 1.2);
+  // A value saved without the custom flag (the earlier 1.6 default) now follows the new default.
+  assert.equal(normalizeAppearance({ lineHeight: 1.6 }).lineHeight, 1.2);
+  assert.equal(normalizeAppearance({ lineHeight: 1.6, lineHeightCustom: true }).lineHeightCustom, true);
 });

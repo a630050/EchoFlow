@@ -8,8 +8,10 @@ export const FONTS = [
 ];
 // color is the light-theme override and darkColor the dark-theme one; '' follows the theme default.
 // lineHeight is shared by source and translation text (multiple of the font size).
-export const LINE_HEIGHT = { min: 1.2, max: 2.2, step: 0.05, default: 1.6 };
-export const defaultAppearance = () => ({ source: { font: 'system', size: 18, color: '', darkColor: '' }, translation: { font: 'system', size: 18, color: '', darkColor: '' }, lineHeight: LINE_HEIGHT.default });
+// lineHeightCustom marks a value the person chose with the slider; without it the current default
+// applies, so a later change of default reaches everyone who never adjusted it.
+export const LINE_HEIGHT = { min: 1, max: 2.2, step: 0.05, default: 1.2 };
+export const defaultAppearance = () => ({ source: { font: 'system', size: 18, color: '', darkColor: '' }, translation: { font: 'system', size: 18, color: '', darkColor: '' }, lineHeight: LINE_HEIGHT.default, lineHeightCustom: false });
 export function normalizeAppearance(value) {
   const result = defaultAppearance();
   for (const kind of ['source', 'translation']) {
@@ -20,9 +22,9 @@ export function normalizeAppearance(value) {
     for (const field of ['color', 'darkColor']) if (/^#[0-9a-f]{6}$/i.test(item[field])) result[kind][field] = item[field];
   }
   const lineHeight = Number(value?.lineHeight);
-  if (Number.isFinite(lineHeight) && lineHeight >= LINE_HEIGHT.min && lineHeight <= LINE_HEIGHT.max) {
-    result.lineHeight = Math.round(lineHeight / LINE_HEIGHT.step) * LINE_HEIGHT.step;
-    result.lineHeight = Number(result.lineHeight.toFixed(2));
+  if (value?.lineHeightCustom === true && Number.isFinite(lineHeight) && lineHeight >= LINE_HEIGHT.min && lineHeight <= LINE_HEIGHT.max) {
+    result.lineHeight = Number((Math.round(lineHeight / LINE_HEIGHT.step) * LINE_HEIGHT.step).toFixed(2));
+    result.lineHeightCustom = true;
   }
   return result;
 }

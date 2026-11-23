@@ -231,7 +231,7 @@ try {
     assert.deepEqual(await evaluate('[getComputedStyle(document.querySelector("#segments .source")).fontSize,getComputedStyle(document.querySelector("#segments .translation")).fontSize,getComputedStyle(document.querySelector("#segments .translation")).color]'), ['30px', '25px', 'rgb(187, 68, 119)']);
     assert.match(await evaluate('getComputedStyle(document.querySelector("#segments .source")).fontFamily'), /DFKai/);
     // Line spacing: tighter default, adjustable for both source and translation.
-    assert.equal(await evaluate('getComputedStyle(document.querySelector("#segments .source")).lineHeight'), '48px', 'default 1.6 × 30px');
+    assert.equal(await evaluate('getComputedStyle(document.querySelector("#segments .source")).lineHeight'), '36px', 'default 1.2 × 30px');
     await evaluate('document.querySelector("#line-height").value=1.3;document.querySelector("#line-height").dispatchEvent(new Event("input"))');
     assert.deepEqual(await evaluate('[getComputedStyle(document.querySelector("#segments .source")).lineHeight,getComputedStyle(document.querySelector("#segments .translation")).lineHeight,document.querySelector("#line-height-output").value]'), ['39px', '32.5px', '1.30 倍']);
     await screenshot('edge-appearance.png');
